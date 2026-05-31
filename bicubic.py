@@ -17,6 +17,8 @@ class BicubicDownSample(nn.Module):
         else:
             return 0.0
 
+    # Build the separable bicubic kernels (one per RGB channel) for the given
+    # downscale factor and register them as non-trainable buffers.
     def __init__(self, factor=4, cuda=True, padding='reflect'):
         super().__init__()
         self.factor = factor
@@ -35,6 +37,8 @@ class BicubicDownSample(nn.Module):
         for param in self.parameters():
             param.requires_grad = False
 
+    # Differentiably downscale `x` by applying the two separable bicubic kernels
+    # as strided convolutions (with mirror padding) along height then width.
     def forward(self, x, nhwc=False, clip_round=False, byte_output=False):
         # x = torch.from_numpy(x).type('torch.FloatTensor')
         filter_height = self.factor * 4

@@ -1,11 +1,3 @@
-import numpy as np
-import PIL
-import PIL.Image
-import sys
-import os
-import glob
-import scipy
-import scipy.ndimage
 import dlib
 from drive import open_url
 from pathlib import Path

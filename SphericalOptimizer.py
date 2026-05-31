@@ -1,4 +1,3 @@
-import math
 import torch
 from torch.optim import Optimizer
 
@@ -10,12 +9,16 @@ from torch.optim import Optimizer
 # opt = SphericalOptimizer(torch.optim.SGD, [x], lr=0.01)
 
 class SphericalOptimizer(Optimizer):
+    # Wrap a base optimizer and record each parameter's initial radius so we can
+    # project back onto that sphere after every step.
     def __init__(self, optimizer, params, **kwargs):
         self.opt = optimizer(params, **kwargs)
         self.params = params
         with torch.no_grad():
             self.radii = {param: (param.pow(2).sum(tuple(range(2,param.ndim)),keepdim=True)+1e-9).sqrt() for param in params}
 
+    # Take a base optimizer step, then renormalize each parameter back onto its
+    # original-radius hypersphere.
     @torch.no_grad()
     def step(self, closure=None):
         loss = self.opt.step(closure)

@@ -2,6 +2,8 @@ import torch
 from bicubic import BicubicDownSample
 
 class LossBuilder(torch.nn.Module):
+    # Set up the downscaler and parse loss_str (e.g. "100*L2+0.05*GEOCROSS") into
+    # a list of (weight, term) pairs evaluated in forward.
     def __init__(self, ref_im, loss_str, eps):
         super(LossBuilder, self).__init__()
         assert ref_im.shape[2]==ref_im.shape[3]
@@ -19,9 +21,13 @@ class LossBuilder(torch.nn.Module):
         l = l if(isinstance(l, list)) else [l]
         return torch.cat([x.flatten() for x in l], dim=0)
 
+    # Mean-squared error between the downscaled output and the reference,
+    # clamped at eps so it stops contributing once "close enough".
     def _loss_l2(self, gen_im_lr, ref_im, **kwargs):
         return ((gen_im_lr - ref_im).pow(2).mean((1, 2, 3)).clamp(min=self.eps).sum())
 
+    # Mean-absolute error between the downscaled output and the reference,
+    # clamped at eps (scaled by 10 to roughly match the L2 magnitude).
     def _loss_l1(self, gen_im_lr, ref_im, **kwargs):
         return 10*((gen_im_lr - ref_im).abs().mean((1, 2, 3)).clamp(min=self.eps).sum())
 
@@ -38,6 +44,8 @@ class LossBuilder(torch.nn.Module):
             D = ((D.pow(2)*512).mean((1, 2))/8.).sum()
             return D
 
+    # Evaluate each parsed loss term against the current latent/generated image,
+    # returning the weighted total plus a dict of the individual term values.
     def forward(self, latent, gen_im):
         var_dict = {'latent': latent,
                     'gen_im_lr': self.D(gen_im),

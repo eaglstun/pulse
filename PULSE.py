@@ -1,5 +1,4 @@
 from stylegan import G_synthesis, G_mapping
-from dataclasses import dataclass
 from SphericalOptimizer import SphericalOptimizer
 from pathlib import Path
 import numpy as np
@@ -12,6 +11,9 @@ from device import device
 
 
 class PULSE(torch.nn.Module):
+    # Load the frozen StyleGAN synthesis network and the cached gaussian_fit
+    # (mean/std of the mapping network output), regenerating the latter from the
+    # mapping network if it isn't already on disk.
     def __init__(self, cache_dir, verbose=True):
         super(PULSE, self).__init__()
 
@@ -61,6 +63,9 @@ class PULSE(torch.nn.Module):
                 if self.verbose:
                     print("\tSaved \"gaussian_fit.pt\"")
 
+    # Run projected gradient descent over the latent (and noise) for `steps`
+    # iterations to find an HR face that downscales to `ref_im`. A generator that
+    # yields (HR, LR) tensors: every step when save_intermediate, else just the best.
     def forward(self, ref_im,
                 seed,
                 loss_str,

@@ -9,14 +9,19 @@ from math import log10, ceil
 import argparse
 
 class Images(Dataset):
+    # Collect every *.png under root_dir; `duplicates` makes each appear N times
+    # so the model produces N independent HR variants per input.
     def __init__(self, root_dir, duplicates):
         self.root_path = Path(root_dir)
         self.image_list = list(self.root_path.glob("*.png"))
         self.duplicates = duplicates # Number of times to duplicate the image in the dataset to produce multiple HR images
 
+    # Dataset length is the image count times the duplication factor.
     def __len__(self):
         return self.duplicates*len(self.image_list)
 
+    # Load the image for this (duplicate-expanded) index as a tensor, returning it
+    # alongside an output name suffixed with the duplicate number when duplicates>1.
     def __getitem__(self, idx):
         img_path = self.image_list[idx//self.duplicates]
         image = torchvision.transforms.ToTensor()(Image.open(img_path))
