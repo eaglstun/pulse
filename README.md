@@ -32,6 +32,7 @@ This fork updates the original CVPR'20 code so it runs on modern hardware and wi
     - [Prereqs](#prereqs)
     - [Data](#data)
     - [Applying PULSE](#applying-pulse)
+    - [Command-line reference](#command-line-reference)
 
 ## What does it do?
 
@@ -47,7 +48,7 @@ The main file of interest for applying PULSE is `run.py`. A full list of argumen
 
 You will need to install cmake first (required for dlib, which is used for face alignment). This fork runs on CUDA, Apple Silicon (MPS), or CPU (see [Fork notes](#fork-notes)); the original only supported CUDA and was tested on Linux and Windows. For the full set of required Python packages, create a Conda environment from the provided YAML, e.g.
 
-```
+```bash
 conda env create -n pulse -f pulse.yml
 conda activate pulse
 ```
@@ -66,8 +67,44 @@ The dataset the original authors evaluated on was [CelebA-HQ](https://github.com
 
 Once your data is appropriately formatted, all you need to do is
 
-```
+```bash
 python run.py
 ```
 
 Enjoy!
+
+### Command-line reference
+
+All directories and hyperparameters are command-line arguments. The tables below are generated from the `argparse` definitions at the top of each script (`python run.py -h` / `python align_face.py -h` print the same descriptions).
+
+**`run.py`** — super-resolve every `*.png` in the input dir:
+
+| Argument                      | Default                | Description                                                                            |
+| ----------------------------- | ---------------------- | -------------------------------------------------------------------------------------- |
+| `-input_dir`                  | `input`                | input data directory                                                                   |
+| `-output_dir`                 | `runs`                 | output data directory                                                                  |
+| `-cache_dir`                  | `cache`                | cache directory for model weights                                                      |
+| `-duplicates`                 | `1`                    | how many HR images to produce for every image in the input directory                   |
+| `-batch_size`                 | `1`                    | batch size to use during optimization                                                  |
+| `-seed`                       | _(none)_               | manual seed to use                                                                     |
+| `-loss_str`                   | `100*L2+0.05*GEOCROSS` | loss function to use (weighted terms: `L2`, `L1`, `GEOCROSS`)                          |
+| `-eps`                        | `2e-3`                 | target for the downscaling loss (L2); optimization stops contributing once within this |
+| `-noise_type`                 | `trainable`            | `zero`, `fixed`, or `trainable`                                                        |
+| `-num_trainable_noise_layers` | `5`                    | number of noise layers to optimize                                                     |
+| `-tile_latent`                | `False` (flag)         | forcibly tile the same latent 18 times                                                 |
+| `-bad_noise_layers`           | `17`                   | noise layers to zero out to improve image quality (split on `.`, e.g. `3.5`)           |
+| `-opt_name`                   | `adam`                 | optimizer for projected gradient descent (`sgd`, `adam`, `sgdm`, `adamax`)             |
+| `-learning_rate`              | `0.4`                  | learning rate to use during optimization                                               |
+| `-steps`                      | `100`                  | number of optimization steps                                                           |
+| `-lr_schedule`                | `linear1cycledrop`     | `fixed`, `linear1cycledrop`, or `linear1cycle`                                         |
+| `-save_intermediate`          | `False` (flag)         | store and save intermediate HR and LR images during optimization                       |
+
+**`align_face.py`** — (optional preprocessing) align + downscale raw photos:
+
+| Argument       | Default    | Description                                                 |
+| -------------- | ---------- | ----------------------------------------------------------- |
+| `-input_dir`   | `realpics` | directory with unprocessed images                           |
+| `-output_dir`  | `input`    | output directory                                            |
+| `-output_size` | `32`       | size to downscale the input images to, must be a power of 2 |
+| `-seed`        | _(none)_   | manual seed to use                                          |
+| `-cache_dir`   | `cache`    | cache directory for model weights                           |
