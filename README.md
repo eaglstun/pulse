@@ -186,4 +186,22 @@ Things to notice, tying back to the explanations above:
 - **All five reach the same `L2` (`0.0020`).** Every variant is a genuinely valid solution — each downscales onto the input equally well. This is the underdetermined-problem point: the parameters don't change _whether_ it matches, they change _which_ realistic face you land on while matching.
 - **`GEOCROSS` behaves exactly as described.** `tile_latent` drives it to `0.000` (with one shared latent there is no spread between the 18 vectors to penalize), `geocross_high` squeezes the 18 vectors tightly together (`0.030`), and `no_geocross` drops the term entirely.
 - **Removing the realism term converges fastest** (`no_geocross` at step 27) because the optimizer only has to satisfy the pixel match — but that is also the configuration most free to drift off the realistic-face manifold on a harder input.
-- Differences here are subtle because `demo.png` is an easy input that every setting solves comfortably; on lower-quality or more ambiguous inputs these knobs separate much more dramatically.
+- Differences here are subtle because `demo.png` is an easy input that every setting solves comfortably; on lower-quality or more ambiguous inputs these knobs separate much more dramatically — which is exactly what the next example shows.
+
+#### The same sweep on a harder input
+
+`input/demo2.png` is the same face shrunk to a tiny **16×16**, so PULSE has to invent a 1024×1024 result from 1/4 as many pixels — a **64× upscale** (PULSE's headline case from the paper) instead of 32×. With so little to pin the answer down, the search has far more freedom, and the parameters now move the result much more.
+
+| Output                    | What's different                  | Final `L2` | Final `GEOCROSS` | Converged |
+| ------------------------- | --------------------------------- | ---------- | ---------------- | --------- |
+| `demo2_baseline.png`      | defaults                          | `0.0020`   | `0.608`          | step 100  |
+| `demo2_tile_latent.png`   | `-tile_latent` (W space)          | `0.0020`   | `0.000`          | step 28   |
+| `demo2_geocross_high.png` | `-loss_str "100*L2+1.0*GEOCROSS"` | `0.0020`   | `0.027`          | step 100  |
+| `demo2_no_geocross.png`   | `-loss_str "100*L2"`              | `0.0020`   | _(n/a)_          | step 20   |
+| `demo2_noise_fixed.png`   | `-noise_type fixed`               | `0.0020`   | `0.574`          | step 100  |
+
+| baseline                                                             | tile_latent                                                                | geocross_high                                                                  | no_geocross                                                                | noise_fixed                                                                |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| ![demo2 baseline](./readme_resources/experiments/demo2_baseline.png) | ![demo2 tile_latent](./readme_resources/experiments/demo2_tile_latent.png) | ![demo2 geocross_high](./readme_resources/experiments/demo2_geocross_high.png) | ![demo2 no_geocross](./readme_resources/experiments/demo2_no_geocross.png) | ![demo2 noise_fixed](./readme_resources/experiments/demo2_noise_fixed.png) |
+
+Every variant still reaches the same `L2` (`0.0020`) — they all downscale onto the input equally well — but now they clearly disagree about _who the person is_: `tile_latent` and `no_geocross` settle on a noticeably darker-haired, warmer-toned face, while the others stay lighter. Same blurry input, same starting latent, different knobs → different believable people. That gap between "matches the pixels" and "which face you get" is the whole point of PULSE, and it widens as the input gets harder.
