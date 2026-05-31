@@ -392,14 +392,10 @@ class G_synthesis(nn.Module):
                  use_styles=True,         # Enable style inputs?
                  const_input_layer=True,         # First layer is a learned constant?
                  use_noise=True,         # Enable noise inputs?
-                 # True = randomize noise inputs every time (non-deterministic), False = read noise inputs from variables.
-                 randomize_noise=True,
                  nonlinearity='lrelu',      # Activation function: 'relu', 'lrelu'
                  use_wscale=True,         # Enable equalized learning rate?
                  use_pixel_norm=False,        # Enable pixelwise feature vector normalization?
                  use_instance_norm=True,         # Enable instance normalization?
-                 # Data type to use for activations and outputs.
-                 dtype=torch.float32,
                  # Low-pass filter to apply when resampling activations. None = no filtering.
                  blur_filter=[1, 2, 1],
                  ):
@@ -416,9 +412,6 @@ class G_synthesis(nn.Module):
 
         act, gain = {'relu': (torch.relu, np.sqrt(2)),
                      'lrelu': (nn.LeakyReLU(negative_slope=0.2), np.sqrt(2))}[nonlinearity]
-        num_layers = resolution_log2 * 2 - 2
-        num_styles = num_layers if use_styles else 1
-        torgbs = []
         blocks = []
         for res in range(2, resolution_log2 + 1):
             channels = nf(res-1)
@@ -440,8 +433,6 @@ class G_synthesis(nn.Module):
     # then the toRGB conv, to produce the generated image.
     def forward(self, dlatents_in, noise_in):
         # Input: Disentangled latents (W) [minibatch, num_layers, dlatent_size].
-        # lod_in = tf.cast(tf.get_variable('lod', initializer=np.float32(0), trainable=False), dtype)
-        batch_size = dlatents_in.size(0)
         for i, m in enumerate(self.blocks.values()):
             if i == 0:
                 x = m(dlatents_in[:, 2*i:2*i+2], noise_in[2*i:2*i+2])
