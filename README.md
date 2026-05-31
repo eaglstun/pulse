@@ -1,12 +1,12 @@
 # PULSE: Self-Supervised Photo Upsampling via Latent Space Exploration of Generative Models
 
-Code accompanying CVPR'20 paper of the same title. Paper link: https://drive.google.com/file/d/1fV7FsmunjDuRrsn4KYf2Efwp0FNBtcR4/view
+Code accompanying CVPR'20 paper of the same title. Paper: [arXiv:2003.03808](https://arxiv.org/abs/2003.03808) ([CVPR open-access PDF](https://openaccess.thecvf.com/content_CVPR_2020/papers/Menon_PULSE_Self-Supervised_Photo_Upsampling_via_Latent_Space_Exploration_of_Generative_CVPR_2020_paper.pdf))
 
 ## NOTE
 
-We have noticed a lot of concern that PULSE will be used to identify individuals whose faces have been blurred out. We want to emphasize that this is impossible - **PULSE makes imaginary faces of people who do not exist, which should not be confused for real people.** It will **not** help identify or reconstruct the original image.
+The original authors noted concern that PULSE would be used to identify individuals whose faces have been blurred out, and emphasized that this is impossible - **PULSE makes imaginary faces of people who do not exist, which should not be confused for real people.** It will **not** help identify or reconstruct the original image.
 
-We also want to address concerns of bias in PULSE. **We have now included a new section in the [paper](https://drive.google.com/file/d/1fV7FsmunjDuRrsn4KYf2Efwp0FNBtcR4/view) and an accompanying model card directly addressing this bias.**
+They also addressed concerns of bias in PULSE: **the [paper](https://arxiv.org/abs/2003.03808) includes a section, along with an accompanying model card, directly addressing this bias.**
 
 ---
 
@@ -41,7 +41,7 @@ Given a low-resolution input image, PULSE searches the outputs of a generative m
 
 ## Usage
 
-The main file of interest for applying PULSE is `run.py`. A full list of arguments with descriptions can be found in that file; here we describe those relevant to getting started.
+The main file of interest for applying PULSE is `run.py`. A full list of arguments with descriptions can be found in that file; the ones relevant to getting started are described below.
 
 ### Prereqs
 
@@ -60,7 +60,7 @@ By default, input data for `run.py` should be placed in `./input/` (though this 
 
 Note that if your data begins at a low resolution already, downscaling it further will retain very little information. In this case, you may wish to bicubically upsample (usually, to 1024x1024) and allow `align_face.py` to downscale for you.
 
-The dataset we evaluated on was [CelebA-HQ](https://github.com/tkarras/progressive_growing_of_gans), but in our experience PULSE works with any picture of a realistic face.
+The dataset the original authors evaluated on was [CelebA-HQ](https://github.com/tkarras/progressive_growing_of_gans), but in their experience PULSE works with any picture of a realistic face.
 
 ### Applying PULSE
 
