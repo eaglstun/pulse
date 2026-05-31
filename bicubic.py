@@ -19,7 +19,7 @@ class BicubicDownSample(nn.Module):
 
     # Build the separable bicubic kernels (one per RGB channel) for the given
     # downscale factor and register them as non-trainable buffers.
-    def __init__(self, factor=4, cuda=True, padding='reflect'):
+    def __init__(self, factor=4, padding='reflect'):
         super().__init__()
         self.factor = factor
         size = factor * 4

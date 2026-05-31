@@ -73,6 +73,8 @@ python run.py
 
 Enjoy!
 
+> _Any resemblance to actual persons, living or dead, is purely coincidental — and also mathematically the whole point._
+
 ### Command-line reference
 
 All directories and hyperparameters are command-line arguments. The tables below are generated from the `argparse` definitions at the top of each script (`python run.py -h` / `python align_face.py -h` print the same descriptions).
