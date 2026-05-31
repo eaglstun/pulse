@@ -26,10 +26,11 @@ class BicubicDownSample(nn.Module):
         k = k / torch.sum(k)
         # k = torch.einsum('i,j->ij', (k, k))
         k1 = torch.reshape(k, shape=(1, 1, size, 1))
-        self.k1 = torch.cat([k1, k1, k1], dim=0)
+        # Register as buffers so the kernels follow the module across .to(device)
+        # and stay device/dtype-aligned with the input via type_as below.
+        self.register_buffer('k1', torch.cat([k1, k1, k1], dim=0))
         k2 = torch.reshape(k, shape=(1, 1, 1, size))
-        self.k2 = torch.cat([k2, k2, k2], dim=0)
-        self.cuda = '.cuda' if cuda else ''
+        self.register_buffer('k2', torch.cat([k2, k2, k2], dim=0))
         self.padding = padding
         for param in self.parameters():
             param.requires_grad = False
@@ -42,8 +43,8 @@ class BicubicDownSample(nn.Module):
 
         pad_along_height = max(filter_height - stride, 0)
         pad_along_width = max(filter_width - stride, 0)
-        filters1 = self.k1.type('torch{}.FloatTensor'.format(self.cuda))
-        filters2 = self.k2.type('torch{}.FloatTensor'.format(self.cuda))
+        filters1 = self.k1.type_as(x)
+        filters2 = self.k2.type_as(x)
 
         # compute actual padding values for each side
         pad_top = pad_along_height // 2
@@ -70,6 +71,6 @@ class BicubicDownSample(nn.Module):
         if nhwc:
             x = torch.transpose(torch.transpose(x, 1, 3), 1, 2)
         if byte_output:
-            return x.type('torch.ByteTensor'.format(self.cuda))
+            return x.byte()
         else:
             return x

@@ -13,6 +13,7 @@ import argparse
 from bicubic import BicubicDownSample
 import torchvision
 from shape_predictor import align_face
+from device import device
 
 parser = argparse.ArgumentParser(description='PULSE')
 
@@ -30,9 +31,14 @@ cache_dir.mkdir(parents=True, exist_ok=True)
 output_dir = Path(args.output_dir)
 output_dir.mkdir(parents=True,exist_ok=True)
 
-print("Downloading Shape Predictor")
-# f=open_url("https://drive.google.com/uc?id=1huhv8PYpNNKbGCLOaYUjOgR1pY5pmbJx", cache_dir=cache_dir, return_path=True)
-f=open_url("https://ericeaglstun.com/misc/shape_predictor_68_face_landmarks.dat", cache_dir=cache_dir, return_path=True)
+predictor_path = Path("shape_predictor_68_face_landmarks.dat")
+if predictor_path.exists():
+    print("Using local Shape Predictor")
+    f = str(predictor_path)
+else:
+    print("Downloading Shape Predictor")
+    # f=open_url("https://drive.google.com/uc?id=1huhv8PYpNNKbGCLOaYUjOgR1pY5pmbJx", cache_dir=cache_dir, return_path=True)
+    f=open_url("https://ericeaglstun.com/misc/shape_predictor_68_face_landmarks.dat", cache_dir=cache_dir, return_path=True)
 predictor = dlib.shape_predictor(f)
 
 for im in Path(args.input_dir).glob("*.*"):
@@ -43,7 +49,7 @@ for im in Path(args.input_dir).glob("*.*"):
             factor = 1024//args.output_size
             assert args.output_size*factor == 1024
             D = BicubicDownSample(factor=factor)
-            face_tensor = torchvision.transforms.ToTensor()(face).unsqueeze(0).cuda()
+            face_tensor = torchvision.transforms.ToTensor()(face).unsqueeze(0).to(device)
             face_tensor_lr = D(face_tensor)[0].cpu().detach().clamp(0, 1)
             face = torchvision.transforms.ToPILImage()(face_tensor_lr)
 

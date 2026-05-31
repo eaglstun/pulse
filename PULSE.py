@@ -8,22 +8,26 @@ import torch
 from loss import LossBuilder
 from functools import partial
 from drive import open_url
+from device import device
 
 
 class PULSE(torch.nn.Module):
     def __init__(self, cache_dir, verbose=True):
         super(PULSE, self).__init__()
 
-        self.synthesis = G_synthesis().cuda()
+        self.synthesis = G_synthesis().to(device)
         self.verbose = verbose
 
         cache_dir = Path(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
         if self.verbose:
             print("Loading Synthesis Network")
-        # with open_url("https://drive.google.com/uc?id=1TCViX1YpQyRsklTVYEJwdbmK91vklCo8", cache_dir=cache_dir, verbose=verbose) as f:
-        with open_url("https://ericeaglstun.com/misc/synthesis.pt", cache_dir=cache_dir, verbose=verbose) as f:
-            self.synthesis.load_state_dict(torch.load(f))
+        if Path("synthesis.pt").exists():
+            self.synthesis.load_state_dict(torch.load("synthesis.pt", map_location=device))
+        else:
+            # with open_url("https://drive.google.com/uc?id=1TCViX1YpQyRsklTVYEJwdbmK91vklCo8", cache_dir=cache_dir, verbose=verbose) as f:
+            with open_url("https://ericeaglstun.com/misc/synthesis.pt", cache_dir=cache_dir, verbose=verbose) as f:
+                self.synthesis.load_state_dict(torch.load(f, map_location=device))
 
         for param in self.synthesis.parameters():
             param.requires_grad = False
@@ -31,22 +35,25 @@ class PULSE(torch.nn.Module):
         self.lrelu = torch.nn.LeakyReLU(negative_slope=0.2)
 
         if Path("gaussian_fit.pt").exists():
-            self.gaussian_fit = torch.load("gaussian_fit.pt")
+            self.gaussian_fit = torch.load("gaussian_fit.pt", map_location=device)
         else:
             if self.verbose:
                 print("\tLoading Mapping Network")
-            mapping = G_mapping().cuda()
+            mapping = G_mapping().to(device)
 
-            # with open_url("https://drive.google.com/uc?id=14R6iHGf5iuVx3DMNsACAl7eBr7Vdpd0k", cache_dir=cache_dir, verbose=verbose) as f:
-            with open_url("https://ericeaglstun.com/misc/mapping.pt", cache_dir=cache_dir, verbose=verbose) as f:
-                mapping.load_state_dict(torch.load(f))
+            if Path("mapping.pt").exists():
+                mapping.load_state_dict(torch.load("mapping.pt", map_location=device))
+            else:
+                # with open_url("https://drive.google.com/uc?id=14R6iHGf5iuVx3DMNsACAl7eBr7Vdpd0k", cache_dir=cache_dir, verbose=verbose) as f:
+                with open_url("https://ericeaglstun.com/misc/mapping.pt", cache_dir=cache_dir, verbose=verbose) as f:
+                    mapping.load_state_dict(torch.load(f, map_location=device))
 
             if self.verbose:
                 print("\tRunning Mapping Network")
             with torch.no_grad():
                 torch.manual_seed(0)
                 latent = torch.randn(
-                    (1000000, 512), dtype=torch.float32, device="cuda")
+                    (1000000, 512), dtype=torch.float32, device=device)
                 latent_out = torch.nn.LeakyReLU(5)(mapping(latent))
                 self.gaussian_fit = {"mean": latent_out.mean(
                     0), "std": latent_out.std(0)}
@@ -71,18 +78,23 @@ class PULSE(torch.nn.Module):
 
         if seed:
             torch.manual_seed(seed)
-            torch.cuda.manual_seed(seed)
-            torch.backends.cudnn.deterministic = True
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(seed)
+                torch.backends.cudnn.deterministic = True
+
+        # When running under DataParallel (CUDA) the input is already scattered
+        # onto the GPU; otherwise (MPS/CPU) move it onto the target device here.
+        ref_im = ref_im.to(device)
 
         batch_size = ref_im.shape[0]
 
         # Generate latent tensor
         if(tile_latent):
             latent = torch.randn(
-                (batch_size, 1, 512), dtype=torch.float, requires_grad=True, device='cuda')
+                (batch_size, 1, 512), dtype=torch.float, requires_grad=True, device=device)
         else:
             latent = torch.randn(
-                (batch_size, 18, 512), dtype=torch.float, requires_grad=True, device='cuda')
+                (batch_size, 18, 512), dtype=torch.float, requires_grad=True, device=device)
 
         # Generate list of noise tensors
         noise = []  # stores all of the noise tensors
@@ -93,13 +105,13 @@ class PULSE(torch.nn.Module):
             res = (batch_size, 1, 2**(i//2+2), 2**(i//2+2))
 
             if(noise_type == 'zero' or i in [int(layer) for layer in bad_noise_layers.split('.')]):
-                new_noise = torch.zeros(res, dtype=torch.float, device='cuda')
+                new_noise = torch.zeros(res, dtype=torch.float, device=device)
                 new_noise.requires_grad = False
             elif(noise_type == 'fixed'):
-                new_noise = torch.randn(res, dtype=torch.float, device='cuda')
+                new_noise = torch.randn(res, dtype=torch.float, device=device)
                 new_noise.requires_grad = False
             elif (noise_type == 'trainable'):
-                new_noise = torch.randn(res, dtype=torch.float, device='cuda')
+                new_noise = torch.randn(res, dtype=torch.float, device=device)
                 if (i < num_trainable_noise_layers):
                     new_noise.requires_grad = True
                     noise_vars.append(new_noise)
@@ -129,7 +141,7 @@ class PULSE(torch.nn.Module):
         schedule_func = schedule_dict[lr_schedule]
         scheduler = torch.optim.lr_scheduler.LambdaLR(opt.opt, schedule_func)
 
-        loss_builder = LossBuilder(ref_im, loss_str, eps).cuda()
+        loss_builder = LossBuilder(ref_im, loss_str, eps).to(device)
 
         min_loss = np.inf
         min_l2 = np.inf

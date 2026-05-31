@@ -1,4 +1,5 @@
 from PULSE import PULSE
+import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.nn import DataParallel
 from pathlib import Path
@@ -56,7 +57,10 @@ out_path.mkdir(parents=True, exist_ok=True)
 dataloader = DataLoader(dataset, batch_size=kwargs["batch_size"])
 
 model = PULSE(cache_dir=kwargs["cache_dir"])
-model = DataParallel(model)
+# DataParallel scatters across multiple CUDA GPUs; on a single GPU, MPS, or CPU
+# it adds no benefit (and MPS isn't supported), so only use it for multi-GPU CUDA.
+if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+    model = DataParallel(model)
 
 toPIL = torchvision.transforms.ToPILImage()
 
