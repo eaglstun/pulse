@@ -290,6 +290,21 @@ class PULSE(torch.nn.Module):
         if self.verbose:
             print(best_summary+current_info)
 
+        # Say so when the run never got the downscaling loss to eps. The optimisation
+        # simply ran out of steps -- it was still descending when we stopped -- and the
+        # face we just handed back does NOT downscale to the input as closely as asked.
+        # Silence here is how a genuinely under-converged result passes for a finished
+        # one. Measured on the bundled demos: an easy input reaches eps by ~step 30, but
+        # a hard one can need 200-800, where the default 100 leaves ~2x the error on the
+        # table. `steps` is the knob, and the 1cycle schedule reshapes itself to fit it.
+        # `_loss_l2` clamps at eps, so min_l2 BOTTOMS OUT at eps -- it can never go below.
+        # Sitting on the clamp floor IS convergence; use a tolerance so float noise at
+        # exactly eps doesn't read as failure.
+        final_l2 = float(min_l2)
+        if self.verbose and final_l2 > eps*1.01:
+            print(f'  NOT CONVERGED: best L2 {final_l2:.5f} > eps {eps:g} after {steps} '
+                  f'steps (still improving). Raise -steps (try {2*steps}).')
+
         # Yield the BEST iterate, not the last one. This used to hand back gen_im (the
         # final step) as HR while taking LR from best_im -- two different images, and
         # neither matched the "BEST (n)" the line above advertises. The loss is not

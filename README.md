@@ -165,6 +165,32 @@ Most of the non-obvious flags are knobs on that balance.
 
 For the full story, see the [PULSE paper](https://arxiv.org/abs/2003.03808) — especially the section on the latent-space search and the spherical prior — and the [StyleGAN paper](https://arxiv.org/abs/1812.04948) for what the latent and noise inputs (and the W / W+ spaces) actually are.
 
+### `-steps` is the parameter that matters most (and the default is too low)
+
+The default `-steps 100` is enough for an easy input and **badly** short for a hard one. Measured on an M4 Max, 2 seeds per cell, scoring the **downscaling L2 of the saved image** — PULSE's own objective, so lower is better:
+
+| input          | 100 steps | 200                | 400     | 800                | GEOCROSS 100→800 |
+| -------------- | --------- | ------------------ | ------- | ------------------ | ---------------- |
+| `demo` (easy)  | 0.00143   | 0.00136            | 0.00136 | 0.00135 (−5%)      | 0.48 → 0.04      |
+| `demo3` (hard) | 0.00402   | **0.00199 (−50%)** | 0.00200 | 0.00201            | 10.45 → 1.44     |
+| `demo5` (hard) | 0.00672   | 0.00363            | 0.00222 | **0.00201 (−70%)** | 6.59 → 1.93      |
+
+`demo3` **halves its error** just by running 200 steps instead of 100; `demo5` needs ~800. The easy input is already converged at 100 and gains nothing. Note that `GEOCROSS` (the realism prior) improves alongside `L2` — the extra steps are not buying pixel accuracy by wandering off the manifold; the faces get _more_ plausible, not less.
+
+The flat plateau at `0.0020` is not a coincidence: `L2` is clamped at `-eps` (default `2e-3`), so once the run reaches the target it stops pushing. **Sitting on that floor is what convergence looks like.** When a run _doesn't_ get there, it now says so:
+
+```
+BEST (100) | L2: 0.0067 | GEOCROSS: 7.6394 | TOTAL: 1.0524 | time: 4.7 | it/s: 21.09
+  NOT CONVERGED: best L2 0.00670 > eps 0.002 after 100 steps (still improving). Raise -steps (try 200).
+```
+
+If you see that line, the face you got back does **not** downscale to your input as closely as you asked — the search simply ran out of steps while still descending. Raise `-steps` until the warning goes away.
+
+Two related findings, same measurements:
+
+- **The `linear1cycledrop` schedule is right; don't switch to `fixed`.** At 400 steps on `demo5`, `fixed` is **65% worse** than the default. The mid-run learning-rate ramp is doing real work, even though it makes the loss non-monotone (which is why the best step is often not the last one).
+- **A higher `-learning_rate` (0.8 vs the default 0.4) helps hard inputs** by roughly 8–10%, and costs nothing on easy ones.
+
 ### Parameter sweep (worked example)
 
 To make the knobs above concrete, here is the same input (`input/demo.png`) super-resolved five times. Every run uses `-seed 42 -steps 100` so the random starting latent is **identical** — the only thing changing is the one parameter noted, so any difference in the output is attributable to that parameter. Outputs are in [`readme_resources/experiments/`](readme_resources/experiments).
