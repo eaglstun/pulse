@@ -52,6 +52,7 @@ parser.add_argument('-learning_rate', type=float, default=0.4, help='Learning ra
 parser.add_argument('-steps', type=int, default=100, help='Number of optimization steps')
 parser.add_argument('-lr_schedule', type=str, default='linear1cycledrop', help='fixed, linear1cycledrop, linear1cycle')
 parser.add_argument('-save_intermediate', action='store_true', help='Whether to store and save intermediate HR and LR images during optimization')
+parser.add_argument('-compile', action='store_true', help='torch.compile the synthesis network: ~11%% faster per step, but costs a one-off warmup (~1s warm cache, ~7s cold). Only a net win past ~200 steps or across many images -- at the default 100 steps it loses. Also immunises against the torch 2.13 MPS backward regression.')
 
 kwargs = vars(parser.parse_args())
 
@@ -61,10 +62,15 @@ out_path.mkdir(parents=True, exist_ok=True)
 
 dataloader = DataLoader(dataset, batch_size=kwargs["batch_size"])
 
-model = PULSE(cache_dir=kwargs["cache_dir"])
 # DataParallel scatters across multiple CUDA GPUs; on a single GPU, MPS, or CPU
 # it adds no benefit (and MPS isn't supported), so only use it for multi-GPU CUDA.
-if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+multi_gpu = torch.cuda.is_available() and torch.cuda.device_count() > 1
+
+# DataParallel re-scatters the module every forward, which fights torch.compile's
+# guard/replay caching, so don't compile in that case.
+model = PULSE(cache_dir=kwargs["cache_dir"],
+              compile_synthesis=kwargs["compile"] and not multi_gpu)
+if multi_gpu:
     model = DataParallel(model)
 
 toPIL = torchvision.transforms.ToPILImage()

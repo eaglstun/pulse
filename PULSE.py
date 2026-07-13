@@ -7,14 +7,14 @@ import torch
 from loss import LossBuilder
 from functools import partial
 from drive import open_url
-from device import device
+from device import device, sync_device
 
 
 class PULSE(torch.nn.Module):
     # Load the frozen StyleGAN synthesis network and the cached gaussian_fit
     # (mean/std of the mapping network output), regenerating the latter from the
     # mapping network if it isn't already on disk.
-    def __init__(self, cache_dir, verbose=True):
+    def __init__(self, cache_dir, verbose=True, compile_synthesis=False):
         super(PULSE, self).__init__()
 
         self.synthesis = G_synthesis().to(device)
@@ -33,6 +33,20 @@ class PULSE(torch.nn.Module):
 
         for param in self.synthesis.parameters():
             param.requires_grad = False
+
+        # The generator is frozen and re-run with identical shapes every step, so it
+        # is an ideal compile target: inductor fuses StyleGAN's long pointwise chains
+        # (noise add -> lrelu -> instance norm -> style mod, 18 times per pass).
+        # Warmup is ~1s, so it pays for itself within the first image. Degrade to eager
+        # if the backend can't handle this torch/platform rather than failing the run.
+        if compile_synthesis:
+            try:
+                self.synthesis = torch.compile(self.synthesis)
+                if self.verbose:
+                    print("Compiling Synthesis Network (first step will be slow)")
+            except Exception as e:
+                if self.verbose:
+                    print(f"torch.compile unavailable, falling back to eager: {e}")
 
         self.lrelu = torch.nn.LeakyReLU(negative_slope=0.2)
 
@@ -148,9 +162,15 @@ class PULSE(torch.nn.Module):
 
         loss_builder = LossBuilder(ref_im, loss_str, eps).to(device)
 
-        min_loss = np.inf
-        min_l2 = np.inf
-        best_summary = ""
+        # Track the best iterate on-device. Comparing a GPU tensor against a Python
+        # float (`if loss < min_loss`) forces a host sync every single step, which
+        # drains the Metal command queue and leaves the GPU idle waiting on Python.
+        # Keeping these as tensors and selecting with torch.where lets the queue stay
+        # deep; the values are read back once, after the loop.
+        min_loss = torch.full((), float('inf'), device=device)
+        min_l2 = torch.full((), float('inf'), device=device)
+        loss_history = []
+        best_im = None
         start_t = time.time()
         gen_im = None
 
@@ -176,17 +196,22 @@ class PULSE(torch.nn.Module):
             loss, loss_dict = loss_builder(latent_in, gen_im)
             loss_dict['TOTAL'] = loss
 
-            # Save best summary for log
-            if(loss < min_loss):
-                min_loss = loss
-                best_summary = f'BEST ({j+1}) | '+' | '.join(
-                    [f'{x}: {y:.4f}' for x, y in loss_dict.items()])
-                best_im = gen_im.clone()
+            # Track the best-so-far image without ever touching the host. `improved` is
+            # a 0-dim bool tensor, so torch.where picks the new image or keeps the old
+            # one entirely on the GPU. Stash the per-step losses (still on device) and
+            # format the log after the loop, where one sync is free.
+            improved = loss < min_loss
+            min_loss = torch.minimum(min_loss, loss.detach())
+            min_l2 = torch.minimum(min_l2, torch.as_tensor(
+                loss_dict['L2'], device=device).detach())
 
-            loss_l2 = loss_dict['L2']
+            if best_im is None:
+                best_im = gen_im.detach().clone()
+            else:
+                best_im = torch.where(improved, gen_im.detach(), best_im)
 
-            if(loss_l2 < min_l2):
-                min_l2 = loss_l2
+            loss_history.append({k: torch.as_tensor(v, device=device).detach()
+                                 for k, v in loss_dict.items()})
 
             # Save intermediate HR and LR images
             if(save_intermediate):
@@ -195,6 +220,20 @@ class PULSE(torch.nn.Module):
             loss.backward()
             opt.step()
             scheduler.step()
+
+        # The loop above never syncs, so Python has been running ahead of the GPU.
+        # Wait for the queued work to actually finish before stopping the clock,
+        # otherwise the reported it/s is the enqueue rate and wildly overstated.
+        sync_device()
+
+        # The single host sync: everything above stayed on-device, so read back once
+        # here to find which step won and format its losses.
+        best_summary = ""
+        if loss_history:
+            totals = torch.stack([h['TOTAL'] for h in loss_history])
+            best_j = int(totals.argmin())
+            best_summary = f'BEST ({best_j+1}) | '+' | '.join(
+                [f'{x}: {float(y):.4f}' for x, y in loss_history[best_j].items()])
 
         total_t = time.time()-start_t
         current_info = f' | time: {total_t:.1f} | it/s: {(j+1)/total_t:.2f} | batchsize: {batch_size}'
