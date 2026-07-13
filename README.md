@@ -197,11 +197,11 @@ To make the knobs above concrete, here is the same input (`input/demo.png`) supe
 
 | Output              | Command (all share `-seed 42 -steps 100`)       | What's different                                              | Final `L2` | Final `GEOCROSS` | Converged |
 | ------------------- | ----------------------------------------------- | ------------------------------------------------------------- | ---------- | ---------------- | --------- |
-| `baseline.png`      | `python run.py`                                 | defaults (`100*L2+0.05*GEOCROSS`, `noise_type trainable`, W+) | `0.0020`   | `0.566`          | step 100  |
+| `baseline.png`      | `python run.py`                                 | defaults (`100*L2+0.05*GEOCROSS`, `noise_type trainable`, W+) | `0.0020`   | `0.523`          | step 100  |
 | `tile_latent.png`   | `python run.py -tile_latent`                    | one shared latent (W space) instead of 18 (W+)                | `0.0020`   | `0.000`          | step 45   |
 | `geocross_high.png` | `python run.py -loss_str "100*L2+1.0*GEOCROSS"` | 20× stronger realism/spread penalty                           | `0.0020`   | `0.030`          | step 100  |
 | `no_geocross.png`   | `python run.py -loss_str "100*L2"`              | realism penalty removed entirely                              | `0.0020`   | _(n/a)_          | step 27   |
-| `noise_fixed.png`   | `python run.py -noise_type fixed`               | noise frozen at random init, not optimized                    | `0.0020`   | `0.659`          | step 100  |
+| `noise_fixed.png`   | `python run.py -noise_type fixed`               | noise frozen at random init, not optimized                    | `0.0020`   | `0.852`          | step 100  |
 
 | baseline                                                 | tile_latent                                                    | geocross_high                                                      | no_geocross                                                    | noise_fixed                                                    |
 | -------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------- | -------------------------------------------------------------- |
@@ -220,14 +220,18 @@ Things to notice, tying back to the explanations above:
 
 | Output                    | What's different                  | Final `L2` | Final `GEOCROSS` | Converged |
 | ------------------------- | --------------------------------- | ---------- | ---------------- | --------- |
-| `demo2_baseline.png`      | defaults                          | `0.0020`   | `0.608`          | step 100  |
+| `demo2_baseline.png`      | defaults                          | `0.0020`   | `0.523`          | step 100  |
 | `demo2_tile_latent.png`   | `-tile_latent` (W space)          | `0.0020`   | `0.000`          | step 28   |
-| `demo2_geocross_high.png` | `-loss_str "100*L2+1.0*GEOCROSS"` | `0.0020`   | `0.027`          | step 100  |
+| `demo2_geocross_high.png` | `-loss_str "100*L2+1.0*GEOCROSS"` | `0.0020`   | `0.026`          | step 100  |
 | `demo2_no_geocross.png`   | `-loss_str "100*L2"`              | `0.0020`   | _(n/a)_          | step 20   |
-| `demo2_noise_fixed.png`   | `-noise_type fixed`               | `0.0020`   | `0.574`          | step 100  |
+| `demo2_noise_fixed.png`   | `-noise_type fixed`               | `0.0020`   | `0.572`          | step 100  |
 
 | baseline                                                             | tile_latent                                                                | geocross_high                                                                  | no_geocross                                                                | noise_fixed                                                                |
 | -------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | ![demo2 baseline](./readme_resources/experiments/demo2_baseline.png) | ![demo2 tile_latent](./readme_resources/experiments/demo2_tile_latent.png) | ![demo2 geocross_high](./readme_resources/experiments/demo2_geocross_high.png) | ![demo2 no_geocross](./readme_resources/experiments/demo2_no_geocross.png) | ![demo2 noise_fixed](./readme_resources/experiments/demo2_noise_fixed.png) |
 
-Every variant still reaches the same `L2` (`0.0020`) — they all downscale onto the input equally well — but now they clearly disagree about _who the person is_: `tile_latent` and `no_geocross` settle on a noticeably darker-haired, warmer-toned face, while the others stay lighter. Same blurry input, same starting latent, different knobs → different believable people. That gap between "matches the pixels" and "which face you get" is the whole point of PULSE, and it widens as the input gets harder.
+Every variant still reaches the same `L2` (`0.0020`) — they all downscale onto the input equally well — but now they clearly disagree about _who the person is_. `baseline`, `geocross_high` and `noise_fixed` cluster around the same light-brown-haired, smiling man. `tile_latent` lands on a visibly different, darker-haired one. And `no_geocross` — the run with the realism term deleted — goes furthest: darkest hair, a warmer, redder skin tone, and, tellingly, **visible speckled colour artifacts** around the mouth and collar.
+
+That last one is the argument for `GEOCROSS` in a single image. With nothing holding the 18 style vectors together, the optimizer is free to wander off the manifold of realistic faces, and it does — it finds a solution that downscales onto the input perfectly (`L2 0.0020`, and it gets there **fastest**, by step 20) while no longer looking entirely like a photograph. Matching the pixels and staying a plausible face are genuinely different objectives, and this is what it looks like when you only ask for the first one.
+
+Same blurry input, same starting latent, different knobs → different believable people. That gap between "matches the pixels" and "which face you get" is the whole point of PULSE, and it widens as the input gets harder.
