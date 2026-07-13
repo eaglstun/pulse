@@ -188,18 +188,19 @@ class BlurLayer(nn.Module):
         return x
 
 
-# Nearest-neighbor upscale a NCHW tensor by an integer factor (optionally gained),
-# implemented via view/expand rather than interpolation.
+# Nearest-neighbor upscale a NCHW tensor by an integer factor (optionally gained).
+#
+# The original hand-rolled this as view/expand/contiguous. F.interpolate is
+# bit-identical here (output and gradient) and faster on MPS: the expand's backward
+# is a sum-reduction over the expanded dims, which Metal handles poorly. Measured on
+# M4 Max: +6.7% end-to-end on torch 2.12. On torch 2.13 the expand backward degrades
+# 36x (see pulse.yml), so this also keeps us off that cliff.
 def upscale2d(x, factor=2, gain=1):
     assert x.dim() == 4
     if gain != 1:
         x = x * gain
     if factor != 1:
-        shape = x.shape
-        x = x.view(shape[0], shape[1], shape[2], 1, shape[3],
-                   1).expand(-1, -1, -1, factor, -1, factor)
-        x = x.contiguous().view(
-            shape[0], shape[1], factor * shape[2], factor * shape[3])
+        x = F.interpolate(x, scale_factor=factor, mode='nearest')
     return x
 
 

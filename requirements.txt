@@ -1,0 +1,17 @@
+# Plain-venv install path (uv or pip), equivalent to pulse.yml's conda path.
+#
+#   uv venv --python 3.13 && uv pip install -r requirements.txt
+#   source .venv/bin/activate && python run.py
+#
+# `cmake` must be on PATH before installing -- dlib builds from source (brew install cmake).
+#
+# torch is capped BELOW 2.13: 2.13.0 regressed the MPS backward pass ~25% on this model
+# (broadcast/expand-reduction backward; expand().contiguous() backward is 36x slower).
+# 2.10-2.12 all measure the same. See the note in pulse.yml.
+torch>=2.10,<2.13
+torchvision>=0.25,<0.28
+numpy
+scipy
+pillow
+requests
+dlib
