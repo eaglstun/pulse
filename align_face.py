@@ -2,10 +2,13 @@ import dlib
 from drive import open_url
 from pathlib import Path
 import argparse
+import sys
 from bicubic import BicubicDownSample
 import torchvision
 from shape_predictor import align_face
 from device import device
+
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp"}
 
 parser = argparse.ArgumentParser(description='PULSE')
 
@@ -33,8 +36,30 @@ else:
     f=open_url("https://ericeaglstun.com/misc/shape_predictor_68_face_landmarks.dat", cache_dir=cache_dir, return_path=True)
 predictor = dlib.shape_predictor(f)
 
-for im in Path(args.input_dir).glob("*.*"):
-    faces = align_face(str(im),predictor)
+input_dir = Path(args.input_dir)
+if not input_dir.is_dir():
+    sys.exit(f"ERROR: input directory {input_dir} does not exist")
+
+images = sorted(p for p in input_dir.glob("*") if p.suffix.lower() in IMAGE_SUFFIXES)
+if not images:
+    sys.exit(f"ERROR: no images found in {input_dir} "
+             f"(looked for: {', '.join(sorted(IMAGE_SUFFIXES))})")
+
+written = 0
+failed = []
+
+for im in images:
+    try:
+        faces = align_face(str(im),predictor)
+    except Exception as e:
+        print(f"{im.name}: ERROR: could not process ({e})")
+        failed.append(im.name)
+        continue
+
+    if not faces:
+        print(f"{im.name}: ERROR: no face detected, nothing written")
+        failed.append(im.name)
+        continue
 
     for i,face in enumerate(faces):
         if(args.output_size):
@@ -45,4 +70,13 @@ for im in Path(args.input_dir).glob("*.*"):
             face_tensor_lr = D(face_tensor)[0].cpu().detach().clamp(0, 1)
             face = torchvision.transforms.ToPILImage()(face_tensor_lr)
 
-        face.save(Path(args.output_dir) / (im.stem+f"_{i}.png"))
+        out_path = Path(args.output_dir) / (im.stem+f"_{i}.png")
+        face.save(out_path)
+        print(f"{im.name}: wrote {out_path}")
+        written += 1
+
+print(f"\nDone: {written} face(s) written to {args.output_dir} "
+      f"from {len(images)} input image(s); {len(failed)} failed.")
+
+if failed:
+    sys.exit(f"ERROR: no usable face in: {', '.join(failed)}")
