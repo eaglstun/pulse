@@ -53,6 +53,7 @@ parser.add_argument('-steps', type=int, default=100, help='Number of optimizatio
 parser.add_argument('-lr_schedule', type=str, default='linear1cycledrop', help='fixed, linear1cycledrop, linear1cycle')
 parser.add_argument('-save_intermediate', action='store_true', help='Whether to store and save intermediate HR and LR images during optimization')
 parser.add_argument('-compile', action='store_true', help='torch.compile the synthesis network: ~11%% faster per step, but costs a one-off warmup (~1s warm cache, ~7s cold). Only a net win past ~200 steps or across many images -- at the default 100 steps it loses. Also immunises against the torch 2.13 MPS backward regression.')
+parser.add_argument('-precision', type=str, default='fp32', choices=['fp32', 'fp16', 'mixed'], help="Precision of the frozen generator; the latent, noise and loss are always fp32. mixed = fp16 for the 256/512/1024 blocks only (where the time is, and where fp16 costs the least accuracy); fp16 = whole network. Both are ~13-16%% faster per step but ~8%% worse per step, so AT EQUAL WALL CLOCK they are a wash on average -- they win on step-starved inputs (spend the speedup on more -steps) and lose on ones that already converge. Use with a raised -steps or not at all. bf16 is not offered: same speed as fp16 on MPS, ~6x the error.")
 
 kwargs = vars(parser.parse_args())
 
@@ -69,7 +70,8 @@ multi_gpu = torch.cuda.is_available() and torch.cuda.device_count() > 1
 # DataParallel re-scatters the module every forward, which fights torch.compile's
 # guard/replay caching, so don't compile in that case.
 model = PULSE(cache_dir=kwargs["cache_dir"],
-              compile_synthesis=kwargs["compile"] and not multi_gpu)
+              compile_synthesis=kwargs["compile"] and not multi_gpu,
+              precision=kwargs["precision"])
 if multi_gpu:
     model = DataParallel(model)
 

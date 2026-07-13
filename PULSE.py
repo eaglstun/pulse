@@ -2,6 +2,7 @@ from stylegan import G_synthesis, G_mapping
 from SphericalOptimizer import SphericalOptimizer
 from pathlib import Path
 import numpy as np
+import os
 import time
 import torch
 from loss import LossBuilder
@@ -14,11 +15,15 @@ class PULSE(torch.nn.Module):
     # Load the frozen StyleGAN synthesis network and the cached gaussian_fit
     # (mean/std of the mapping network output), regenerating the latter from the
     # mapping network if it isn't already on disk.
-    def __init__(self, cache_dir, verbose=True, compile_synthesis=False):
+    def __init__(self, cache_dir, verbose=True, compile_synthesis=False, precision='fp32'):
         super(PULSE, self).__init__()
 
         self.synthesis = G_synthesis().to(device)
         self.verbose = verbose
+        self.precision = precision
+        self.synth_dtype = {'fp32': torch.float32,
+                            'fp16': torch.float16,
+                            'mixed': torch.float32}[precision]
 
         cache_dir = Path(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -33,6 +38,28 @@ class PULSE(torch.nn.Module):
 
         for param in self.synthesis.parameters():
             param.requires_grad = False
+
+        # Run the frozen generator in half precision, but keep the OPTIMISED variables
+        # (latent, noise) and the loss in fp32 -- see forward(). Half-precision weights
+        # cut conv bandwidth; half-precision Adam does not survive contact with reality
+        # (its eps=1e-8 is flat zero in fp16, and the L2 loss lives around 2e-3).
+        # bf16 is deliberately not offered: same speed as fp16 on MPS, ~6x the error.
+        # Static loss scale for half-precision backward (see forward()). Measured: it does
+        # NOT rescue whole-network fp16 (the damage is in the forward pass, not gradient
+        # underflow), and scales above ~1024 overflow. Kept modest and only where half is
+        # actually in play.
+        self.grad_scale = float(os.environ.get("PULSE_GRAD_SCALE", 1024.0)) \
+            if precision != 'fp32' else 1.0
+
+        if precision == 'fp16':
+            # Whole-network half. Fast but measurably worse output -- see -precision mixed.
+            self.synthesis = self.synthesis.to(self.synth_dtype)
+        elif precision == 'mixed':
+            # Half only where it's free: the 256/512/1024 blocks are ~89% of the step time
+            # but the most fp16-tolerant. See G_synthesis.set_high_res_precision.
+            self.synthesis.set_high_res_precision(torch.float16, min_res=256)
+        if self.verbose and precision != 'fp32':
+            print(f"Synthesis Network precision: {precision} (grad scale {self.grad_scale:g})")
 
         # The generator is frozen and re-run with identical shapes every step, so it
         # is an ideal compile target: inductor fuses StyleGAN's long pointwise chains
@@ -189,10 +216,22 @@ class PULSE(torch.nn.Module):
             latent_in = self.lrelu(
                 latent_in*self.gaussian_fit["std"] + self.gaussian_fit["mean"])
 
-            # Normalize image to [0,1] instead of [-1,1]
-            gen_im = (self.synthesis(latent_in, noise)+1)/2
+            # Cast into the generator's dtype at its boundary and come straight back out
+            # to fp32. The optimised variables stay fp32 leaves, so Adam and the spherical
+            # projection keep full precision and only the (frozen, bandwidth-bound) conv
+            # stack runs in half. Autograd puts the matching casts in the backward pass.
+            if self.synth_dtype != torch.float32:
+                syn_out = self.synthesis(latent_in.to(self.synth_dtype),
+                                         [n.to(self.synth_dtype) for n in noise])
+                syn_out = syn_out.float()
+            else:
+                syn_out = self.synthesis(latent_in, noise)
 
-            # Calculate Losses
+            # Normalize image to [0,1] instead of [-1,1]
+            gen_im = (syn_out+1)/2
+
+            # Calculate Losses (in fp32: eps is 2e-3 and L2 lands near it, which is
+            # exactly the range where fp16 rounding starts eating the signal)
             loss, loss_dict = loss_builder(latent_in, gen_im)
             loss_dict['TOTAL'] = loss
 
@@ -217,7 +256,18 @@ class PULSE(torch.nn.Module):
             if(save_intermediate):
                 yield (best_im.cpu().detach().clamp(0, 1), loss_builder.D(best_im).cpu().detach().clamp(0, 1))
 
-            loss.backward()
+            # Loss scaling for fp16. Gradients flowing back through the half-precision
+            # generator can underflow fp16's ~6e-8 floor and flush to zero, which shows
+            # up not as a crash but as a quietly worse optimum. Scale the loss up before
+            # backward, then unscale the (fp32) grads before the optimiser sees them, so
+            # the step is mathematically unchanged.
+            if self.grad_scale != 1.0:
+                (loss*self.grad_scale).backward()
+                for p in var_list:
+                    if p.grad is not None:
+                        p.grad.div_(self.grad_scale)
+            else:
+                loss.backward()
             opt.step()
             scheduler.step()
 
