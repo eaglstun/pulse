@@ -109,11 +109,15 @@ Matching the pixels and staying a plausible human being are genuinely different 
 
 ---
 
-## Sweep three: a child in hypnosis goggles
+## Sweep three: things that are not faces
 
-The two sweeps above are polite. Both inputs are photographs of ordinary adults doing nothing unusual, so every setting solves them and the differences are a matter of taste.
+The two sweeps above are polite. Both inputs are photographs of ordinary adults doing nothing unusual, so every setting solves them, every variant lands on the same `L2 0.0020`, and the differences are a matter of taste.
 
-So let's give it something it has no business succeeding at.
+So let's give it two things it has no business succeeding at.
+
+The point of both is the same, and it is the most useful thing in these docs: **"match the input" and "be a real face" are different objectives.** You never notice, because for a photograph of an ordinary person you can satisfy both at once. Hand PULSE something impossible and the two goals tear apart in front of you — and you get to watch which one each setting is prepared to abandon.
+
+### A child in hypnosis goggles
 
 <img src="../readme_resources/experiments/hypno_original.jpeg" alt="The original photo: a small child with magenta hair wearing novelty hypnosis-spiral goggles, hands raised palms-out beside their face" width="240"> <img src="../readme_resources/experiments/hypno_input.png" alt="The same photo downscaled to 32x32, an unrecognisable smear of pink and yellow blocks" width="240">
 
@@ -143,9 +147,7 @@ Read that table left to right. It is the realism prior, as a dial.
 
 And `no_geocross` gets the **best pixel match of the five** (`0.0023`, nearly on target). Of course it does. It was the only one willing to do whatever it took.
 
-That is the whole thesis of the loss function, in five pictures. "Match the input" and "be a real face" are _not the same objective_, and normally you never notice, because for a photograph of an ordinary person you can satisfy both at once. Hand it something impossible and the two goals tear apart, and you get to watch which one each setting is prepared to abandon.
-
-### And then there's `-steps`
+#### And then there's `-steps`
 
 The default 100 steps says `NOT CONVERGED` on this input, which is exactly what [the section at the top of this page](#the-headline--steps-is-too-low-and-it-isnt-close) predicts. So give it 800.
 
@@ -158,6 +160,55 @@ More steps did not make it more normal. **More steps made it commit to the bit.*
 Look at the eyes on the right: those are _golden rings_. Look at the hair: magenta is bleeding in. Given a hundred steps it gave up early and handed back a bland face that didn't match. Given eight hundred, it kept descending — and the only way down was to actually render the goggles.
 
 The 100-step version isn't a tamer answer. It's an **unfinished** one. That's the difference the `NOT CONVERGED` warning is trying to tell you about, and this is the clearest picture of it in the repo.
+
+---
+
+### A dog
+
+The child at least _was_ a person. Let's remove that too.
+
+<img src="../readme_resources/experiments/dog_original.png" alt="A yorkshire terrier puppy looking up at the camera" width="240"> <img src="../readme_resources/experiments/dog_input.png" alt="The same yorkie at 32x32: two dark eye-blobs and a dark nose-blob" width="240">
+
+First, the pipeline's own opinion:
+
+```
+$ python align_face.py -input_dir realpics -output_dir input -output_size 32
+yorkie-puppy-856907420.jpg: Number of faces detected: 0
+```
+
+dlib looked at this photograph and correctly concluded there is no person in it. (Note also that it then writes nothing and exits `0` — if you feed `align_face.py` a directory of non-faces, it will quietly produce no output and not complain. Worth knowing.)
+
+We overruled it — hand-cropped the head, downscaled to 32×32, and fed it to PULSE directly. Because look at that right-hand image. Two dark blobs where eyes belong, one dark blob beneath. **At 32×32, a yorkie is structurally indistinguishable from a person**, and PULSE, which has never seen anything but human faces and cannot draw anything else, will confidently find one.
+
+| Setting         | `L2` (target `0.002`)       | `GEOCROSS`  | What it did                                 |
+| --------------- | --------------------------- | ----------- | ------------------------------------------- |
+| `geocross_high` | **0.0186** (worst match)    | 0.188       | A cheerful blonde woman. No dog whatsoever. |
+| `tile_latent`   | 0.0085                      | 0.000       | A smirking blonde child.                    |
+| `noise_fixed`   | 0.0070                      | 8.27        | Dog-shaped shadows across a human face.     |
+| `baseline`      | 0.0060                      | 7.11        | Same, softer.                               |
+| `no_geocross`   | **0.0020** (dead on target) | _(deleted)_ | Painted the dog's markings onto a person.   |
+
+| geocross_high                                                                                                                                       | baseline                                                                                                                                        | noise_fixed                                                                                                                                 | tile_latent                                                                                                                | no_geocross                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="../readme_resources/experiments/dog_geocross_high.png" alt="dog geocross_high: a cheerful blonde woman, no trace of the dog" width="160"> | <img src="../readme_resources/experiments/dog_baseline.png" alt="dog baseline: a blonde person with a dark smudge across the eyes" width="160"> | <img src="../readme_resources/experiments/dog_noise_fixed.png" alt="dog noise_fixed: similar blonde face with a dark eye band" width="160"> | <img src="../readme_resources/experiments/dog_tile_latent.png" alt="dog tile_latent: a smirking blonde child" width="160"> | <img src="../readme_resources/experiments/dog_no_geocross.png" alt="dog no_geocross: a human face wearing the yorkie's exact markings - dark muzzle around the nose and mouth, dark mask across the brow" width="160"> |
+
+**The yorkie is a cheerful blonde woman.**
+
+That's `geocross_high`, and it is the same refusal as before, only more total. Maximum realism prior, and the dog is gone — not reinterpreted, not stylised, simply _gone_, replaced by a pleasant stranger. It is also the **worst pixel match of the five** by a mile: `L2 0.0186`, more than nine times the target. Asked to choose between a plausible human and a correct answer, it does not hesitate.
+
+At the other end, `no_geocross` stops pretending. It paints the yorkie's **actual markings onto a human face** — the dark muzzle wrapped around the nose and mouth, the dark mask across the brow, the shaggy pale coat resolving into hair. It is the only run of the five to land _exactly_ on target (`L2 0.0020`). It got there by abandoning the one constraint that made it a face.
+
+#### Patience makes it worse (correctly)
+
+| 100 steps — `L2 0.0060`, NOT CONVERGED                                                                                                                       | 800 steps — `L2 0.0020`, converged                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="../readme_resources/experiments/dog_baseline.png" alt="100 steps: a bland smiling blonde person that does not really match the input" width="260"> | <img src="../readme_resources/experiments/dog_800steps.png" alt="800 steps: the same face, now with the dog's dark muzzle and brow markings grown across it" width="260"> |
+
+Same lesson as the goggles, and if anything blunter. A hundred steps buys you a bland smiling person who doesn't match the input. Eight hundred steps converges — and it converges _toward the dog_, growing the muzzle and the brow-mask as it goes, because that is the only direction the loss goes down.
+
+**More steps did not make it more human. More steps made it more dog.**
+
+Which is, when you think about it, the correct behaviour. PULSE was never trying to draw a person. It was trying to find something that downscales onto your input, and it will keep walking toward that no matter how strange the neighbourhood gets. The realism prior is the only thing that ever asked it to stay respectable, and you are welcome to turn that off.
 
 ---
 

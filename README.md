@@ -49,7 +49,24 @@ Delete the prior and nothing is holding the leash: glowing green slits for eyes,
 
 That is the entire loss function in one row of pictures. "Match the input" and "be a real face" are different objectives — you just never notice, because for a photo of a normal person you can have both.
 
-The full autopsy, including what happens when you stop being impatient and give it 800 steps (spoiler: it does **not** get more normal), is in **[Tuning](docs/tuning.md#sweep-three-a-child-in-hypnosis-goggles)**.
+### Now a dog
+
+<img src="./readme_resources/experiments/dog_original.png" alt="A yorkshire terrier puppy looking up at the camera" width="200"> <img src="./readme_resources/experiments/dog_input.png" alt="The same yorkie at 32x32 - two dark eye-blobs and a dark nose-blob" width="200">
+
+`align_face.py` looked at this photograph and reported **`Number of faces detected: 0`**, which is the correct and dignified answer. We overruled it.
+
+Because look at the 32×32. Two dark blobs where eyes go, one dark blob below. At that resolution, a yorkie is _structurally indistinguishable from a person_, and PULSE — which knows nothing but human faces — will confidently find one.
+
+| `geocross_high`                                                                                                                  | `baseline`                                                                                                                       | `noise_fixed`                                                                                                           | `tile_latent`                                                                                            | `no_geocross`                                                                                                                                                                                     |
+| -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="./readme_resources/experiments/dog_geocross_high.png" alt="A cheerful blonde woman - no trace of the dog" width="145"> | <img src="./readme_resources/experiments/dog_baseline.png" alt="A blonde person with a dark smudge across the eyes" width="145"> | <img src="./readme_resources/experiments/dog_noise_fixed.png" alt="Similar blonde face with dark eye band" width="145"> | <img src="./readme_resources/experiments/dog_tile_latent.png" alt="A smirking blonde child" width="145"> | <img src="./readme_resources/experiments/dog_no_geocross.png" alt="A human face wearing the dog's exact markings - dark muzzle around the nose and mouth, dark mask across the brow" width="145"> |
+| _a nice blonde lady_                                                                                                             | _dog-shaped shadows_                                                                                                             | _same_                                                                                                                  | _smirking child_                                                                                         | _**the dog won**_                                                                                                                                                                                 |
+
+**The yorkie is a cheerful blonde woman.** That's `geocross_high` — maximum realism prior, and the dog is erased without a trace. It is also, once again, the **worst** pixel match of the five (`L2 0.0186`, nine times the target). It would rather be a nice photograph of a person than a correct one.
+
+And on the right, with the prior deleted, PULSE stops pretending: it paints the yorkie's **actual markings onto a human face** — the dark muzzle around the nose and mouth, the mask across the brow, the shaggy pale coat becoming hair. It is the only variant that hit the target _exactly_ (`L2 0.0020`). It got there by giving up on being a person.
+
+Both sweeps, plus what happens when you stop being impatient and hand it 800 steps — spoiler: **it does not get more normal, it gets more dog** — are in **[Tuning](docs/tuning.md#sweep-three-things-that-are-not-faces)**.
 
 ---
 
