@@ -20,6 +20,12 @@ That isn't a disclaimer bolted onto the front of this README. It's the mechanism
 
 ## ⚠️ Read this part
 
+![Three panels: a 16x16 blurred face, the sharp face PULSE reconstructed from it, and the actual photograph the blur came from. The reconstruction and the real person are clearly two different men.](./readme_resources/before_after.png)
+
+_Left: the input. Middle: what PULSE invented. **Right: who it actually was.**_
+
+Look at the middle and the right for a moment. Both are sharp. Both shrink down onto that same blur. They are **not the same man** — different jaw, different eyes, different person — and PULSE had no way to prefer one over the other, because the information that would tell them apart was destroyed before it ever arrived.
+
 The original authors were blunt about this and so am I: **PULSE makes imaginary faces of people who do not exist.** It **cannot** un-blur a redacted face and identify someone. The detail the blur destroyed is gone; nothing brings it back. What comes back is a plausible invention.
 
 The search also leans toward the kinds of faces StyleGAN saw most of in training. The [paper](https://arxiv.org/abs/2003.03808) has a section and a model card addressing that bias directly. Read them before you do anything with this beyond making pictures.

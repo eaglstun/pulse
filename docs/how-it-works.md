@@ -52,6 +52,16 @@ What makes this _useful_ is that a trained GAN's latent space is **organized**, 
 
 PULSE exploits all three at once. It searches for an input whose output downscales onto your photo (using the smoothness), while forcing the search to stay on the realistic-face surface (so you get a person, not static that happens to shrink correctly).
 
+### Watch it walk
+
+![An animation of the optimization: the generated face starts as a dark-haired woman and morphs, frame by frame, into a smiling man, as gradient descent walks the latent vector toward one that downscales onto the input.](../readme_resources/optimization.gif)
+
+That is 43 steps of the search, and it is worth sitting with what it shows.
+
+**It starts on a woman.** Not because anything is wrong — because the latent vector was initialized at random, and a random point in this space is simply _some face_. Every frame after that is one gradient step: the vector slides a little, and the face it renders slides with it, continuously, always remaining a plausible human being on the way. There is never a frame that is half-face or static or garbage.
+
+That continuity is the whole reason this works. Gradient descent needs to be able to take a small step and get a small change. In pixel space that is hopeless — nudging pixels toward a target just gives you a blur. In _latent_ space, a small step gives you a slightly different person, and you can follow the slope from a stranger all the way to someone who fits.
+
 ## The two forces
 
 Every knob in this repo is a knob on a tug-of-war between two things:
