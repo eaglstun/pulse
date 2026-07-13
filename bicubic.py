@@ -5,10 +5,8 @@ from torch.nn import functional as F
 
 class BicubicDownSample(nn.Module):
     def bicubic_kernel(self, x, a=-0.50):
-        """
-        This equation is exactly copied from the website below:
-        https://clouard.users.greyc.fr/Pantheon/experiments/rescaling/index-en.html#bicubic
-        """
+        # This equation is exactly copied from the website below:
+        # https://clouard.users.greyc.fr/Pantheon/experiments/rescaling/index-en.html#bicubic
         abs_x = torch.abs(x)
         if abs_x <= 1.:
             return (a + 2.) * torch.pow(abs_x, 3.) - (a + 3.) * torch.pow(abs_x, 2.) + 1

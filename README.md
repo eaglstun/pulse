@@ -1,6 +1,6 @@
 # PULSE: Self-Supervised Photo Upsampling via Latent Space Exploration of Generative Models
 
-Code accompanying CVPR'20 paper of the same title. Paper: [arXiv:2003.03808](https://arxiv.org/abs/2003.03808) ([CVPR open-access PDF](https://openaccess.thecvf.com/content_CVPR_2020/papers/Menon_PULSE_Self-Supervised_Photo_Upsampling_via_Latent_Space_Exploration_of_Generative_CVPR_2020_paper.pdf))
+Code accompanying CVPR'20 paper of the same title. Paper: [arXiv:2003.03808](https://arxiv.org/abs/2003.03808) ([CVPR open-access PDF](https://openaccess.thecvf.com/content_CVPR_2020/papers/Menon_PULSE_Self-Supervised_Photo_Upsampling_via_Latent_Space_Exploration_of_Generative_CVPR_2020_paper.pdf)). A Markdown transcription of the paper is in [`paper.md`](paper.md).
 
 ## NOTE
 

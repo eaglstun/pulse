@@ -12,7 +12,7 @@ import re
 import uuid
 
 def is_url(obj: Any) -> bool:
-    """Determine whether the given object is a valid URL string."""
+    # Determine whether the given object is a valid URL string.
     if not isinstance(obj, str) or not "://" in obj:
         return False
     try:
@@ -28,7 +28,7 @@ def is_url(obj: Any) -> bool:
 
 
 def open_url(url: str, cache_dir: str = None, num_attempts: int = 10, verbose: bool = True, return_path: bool = False) -> Any:
-    """Download the given URL and return a binary-mode file object to access the data."""
+    # Download the given URL and return a binary-mode file object to access the data.
     assert is_url(url)
     assert num_attempts >= 1
 
