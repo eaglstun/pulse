@@ -2,23 +2,28 @@ from stylegan import G_synthesis, G_mapping
 from SphericalOptimizer import SphericalOptimizer
 from pathlib import Path
 import numpy as np
+import os
 import time
 import torch
 from loss import LossBuilder
 from functools import partial
 from drive import open_url
-from device import device
+from device import device, sync_device
 
 
 class PULSE(torch.nn.Module):
     # Load the frozen StyleGAN synthesis network and the cached gaussian_fit
     # (mean/std of the mapping network output), regenerating the latter from the
     # mapping network if it isn't already on disk.
-    def __init__(self, cache_dir, verbose=True):
+    def __init__(self, cache_dir, verbose=True, compile_synthesis=False, precision='fp32'):
         super(PULSE, self).__init__()
 
         self.synthesis = G_synthesis().to(device)
         self.verbose = verbose
+        self.precision = precision
+        self.synth_dtype = {'fp32': torch.float32,
+                            'fp16': torch.float16,
+                            'mixed': torch.float32}[precision]
 
         cache_dir = Path(cache_dir)
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -33,6 +38,42 @@ class PULSE(torch.nn.Module):
 
         for param in self.synthesis.parameters():
             param.requires_grad = False
+
+        # Run the frozen generator in half precision, but keep the OPTIMISED variables
+        # (latent, noise) and the loss in fp32 -- see forward(). Half-precision weights
+        # cut conv bandwidth; half-precision Adam does not survive contact with reality
+        # (its eps=1e-8 is flat zero in fp16, and the L2 loss lives around 2e-3).
+        # bf16 is deliberately not offered: same speed as fp16 on MPS, ~6x the error.
+        # Static loss scale for half-precision backward (see forward()). Measured: it does
+        # NOT rescue whole-network fp16 (the damage is in the forward pass, not gradient
+        # underflow), and scales above ~1024 overflow. Kept modest and only where half is
+        # actually in play.
+        self.grad_scale = float(os.environ.get("PULSE_GRAD_SCALE", 1024.0)) \
+            if precision != 'fp32' else 1.0
+
+        if precision == 'fp16':
+            # Whole-network half. Fast but measurably worse output -- see -precision mixed.
+            self.synthesis = self.synthesis.to(self.synth_dtype)
+        elif precision == 'mixed':
+            # Half only where it's free: the 256/512/1024 blocks are ~89% of the step time
+            # but the most fp16-tolerant. See G_synthesis.set_high_res_precision.
+            self.synthesis.set_high_res_precision(torch.float16, min_res=256)
+        if self.verbose and precision != 'fp32':
+            print(f"Synthesis Network precision: {precision} (grad scale {self.grad_scale:g})")
+
+        # The generator is frozen and re-run with identical shapes every step, so it
+        # is an ideal compile target: inductor fuses StyleGAN's long pointwise chains
+        # (noise add -> lrelu -> instance norm -> style mod, 18 times per pass).
+        # Warmup is ~1s, so it pays for itself within the first image. Degrade to eager
+        # if the backend can't handle this torch/platform rather than failing the run.
+        if compile_synthesis:
+            try:
+                self.synthesis = torch.compile(self.synthesis)
+                if self.verbose:
+                    print("Compiling Synthesis Network (first step will be slow)")
+            except Exception as e:
+                if self.verbose:
+                    print(f"torch.compile unavailable, falling back to eager: {e}")
 
         self.lrelu = torch.nn.LeakyReLU(negative_slope=0.2)
 
@@ -148,9 +189,15 @@ class PULSE(torch.nn.Module):
 
         loss_builder = LossBuilder(ref_im, loss_str, eps).to(device)
 
-        min_loss = np.inf
-        min_l2 = np.inf
-        best_summary = ""
+        # Track the best iterate on-device. Comparing a GPU tensor against a Python
+        # float (`if loss < min_loss`) forces a host sync every single step, which
+        # drains the Metal command queue and leaves the GPU idle waiting on Python.
+        # Keeping these as tensors and selecting with torch.where lets the queue stay
+        # deep; the values are read back once, after the loop.
+        min_loss = torch.full((), float('inf'), device=device)
+        min_l2 = torch.full((), float('inf'), device=device)
+        loss_history = []
+        best_im = None
         start_t = time.time()
         gen_im = None
 
@@ -169,40 +216,101 @@ class PULSE(torch.nn.Module):
             latent_in = self.lrelu(
                 latent_in*self.gaussian_fit["std"] + self.gaussian_fit["mean"])
 
-            # Normalize image to [0,1] instead of [-1,1]
-            gen_im = (self.synthesis(latent_in, noise)+1)/2
+            # Cast into the generator's dtype at its boundary and come straight back out
+            # to fp32. The optimised variables stay fp32 leaves, so Adam and the spherical
+            # projection keep full precision and only the (frozen, bandwidth-bound) conv
+            # stack runs in half. Autograd puts the matching casts in the backward pass.
+            if self.synth_dtype != torch.float32:
+                syn_out = self.synthesis(latent_in.to(self.synth_dtype),
+                                         [n.to(self.synth_dtype) for n in noise])
+                syn_out = syn_out.float()
+            else:
+                syn_out = self.synthesis(latent_in, noise)
 
-            # Calculate Losses
+            # Normalize image to [0,1] instead of [-1,1]
+            gen_im = (syn_out+1)/2
+
+            # Calculate Losses (in fp32: eps is 2e-3 and L2 lands near it, which is
+            # exactly the range where fp16 rounding starts eating the signal)
             loss, loss_dict = loss_builder(latent_in, gen_im)
             loss_dict['TOTAL'] = loss
 
-            # Save best summary for log
-            if(loss < min_loss):
-                min_loss = loss
-                best_summary = f'BEST ({j+1}) | '+' | '.join(
-                    [f'{x}: {y:.4f}' for x, y in loss_dict.items()])
-                best_im = gen_im.clone()
+            # Track the best-so-far image without ever touching the host. `improved` is
+            # a 0-dim bool tensor, so torch.where picks the new image or keeps the old
+            # one entirely on the GPU. Stash the per-step losses (still on device) and
+            # format the log after the loop, where one sync is free.
+            improved = loss < min_loss
+            min_loss = torch.minimum(min_loss, loss.detach())
+            min_l2 = torch.minimum(min_l2, torch.as_tensor(
+                loss_dict['L2'], device=device).detach())
 
-            loss_l2 = loss_dict['L2']
+            if best_im is None:
+                best_im = gen_im.detach().clone()
+            else:
+                best_im = torch.where(improved, gen_im.detach(), best_im)
 
-            if(loss_l2 < min_l2):
-                min_l2 = loss_l2
+            loss_history.append({k: torch.as_tensor(v, device=device).detach()
+                                 for k, v in loss_dict.items()})
 
             # Save intermediate HR and LR images
             if(save_intermediate):
                 yield (best_im.cpu().detach().clamp(0, 1), loss_builder.D(best_im).cpu().detach().clamp(0, 1))
 
-            loss.backward()
+            # Loss scaling for fp16. Gradients flowing back through the half-precision
+            # generator can underflow fp16's ~6e-8 floor and flush to zero, which shows
+            # up not as a crash but as a quietly worse optimum. Scale the loss up before
+            # backward, then unscale the (fp32) grads before the optimiser sees them, so
+            # the step is mathematically unchanged.
+            if self.grad_scale != 1.0:
+                (loss*self.grad_scale).backward()
+                for p in var_list:
+                    if p.grad is not None:
+                        p.grad.div_(self.grad_scale)
+            else:
+                loss.backward()
             opt.step()
             scheduler.step()
+
+        # The loop above never syncs, so Python has been running ahead of the GPU.
+        # Wait for the queued work to actually finish before stopping the clock,
+        # otherwise the reported it/s is the enqueue rate and wildly overstated.
+        sync_device()
+
+        # The single host sync: everything above stayed on-device, so read back once
+        # here to find which step won and format its losses.
+        best_summary = ""
+        if loss_history:
+            totals = torch.stack([h['TOTAL'] for h in loss_history])
+            best_j = int(totals.argmin())
+            best_summary = f'BEST ({best_j+1}) | '+' | '.join(
+                [f'{x}: {float(y):.4f}' for x, y in loss_history[best_j].items()])
 
         total_t = time.time()-start_t
         current_info = f' | time: {total_t:.1f} | it/s: {(j+1)/total_t:.2f} | batchsize: {batch_size}'
         if self.verbose:
             print(best_summary+current_info)
-        # if(min_l2 <= eps):
-        
-        yield (gen_im.clone().cpu().detach().clamp(0, 1), loss_builder.D(best_im).cpu().detach().clamp(0, 1))
+
+        # Say so when the run never got the downscaling loss to eps. The optimisation
+        # simply ran out of steps -- it was still descending when we stopped -- and the
+        # face we just handed back does NOT downscale to the input as closely as asked.
+        # Silence here is how a genuinely under-converged result passes for a finished
+        # one. Measured on the bundled demos: an easy input reaches eps by ~step 30, but
+        # a hard one can need 200-800, where the default 100 leaves ~2x the error on the
+        # table. `steps` is the knob, and the 1cycle schedule reshapes itself to fit it.
+        # `_loss_l2` clamps at eps, so min_l2 BOTTOMS OUT at eps -- it can never go below.
+        # Sitting on the clamp floor IS convergence; use a tolerance so float noise at
+        # exactly eps doesn't read as failure.
+        final_l2 = float(min_l2)
+        if self.verbose and final_l2 > eps*1.01:
+            print(f'  NOT CONVERGED: best L2 {final_l2:.5f} > eps {eps:g} after {steps} '
+                  f'steps (still improving). Raise -steps (try {2*steps}).')
+
+        # Yield the BEST iterate, not the last one. This used to hand back gen_im (the
+        # final step) as HR while taking LR from best_im -- two different images, and
+        # neither matched the "BEST (n)" the line above advertises. The loss is not
+        # monotone (the 1cycle schedule raises the LR mid-run, and GEOCROSS trades off
+        # against L2), so on some inputs the last step is genuinely worse than the best.
+        yield (best_im.cpu().detach().clamp(0, 1), loss_builder.D(best_im).cpu().detach().clamp(0, 1))
         
         # else:
         #     print("Could not find a face that downscales correctly within epsilon")

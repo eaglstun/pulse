@@ -188,18 +188,19 @@ class BlurLayer(nn.Module):
         return x
 
 
-# Nearest-neighbor upscale a NCHW tensor by an integer factor (optionally gained),
-# implemented via view/expand rather than interpolation.
+# Nearest-neighbor upscale a NCHW tensor by an integer factor (optionally gained).
+#
+# The original hand-rolled this as view/expand/contiguous. F.interpolate is
+# bit-identical here (output and gradient) and faster on MPS: the expand's backward
+# is a sum-reduction over the expanded dims, which Metal handles poorly. Measured on
+# M4 Max: +6.7% end-to-end on torch 2.12. On torch 2.13 the expand backward degrades
+# 36x (see pulse.yml), so this also keeps us off that cliff.
 def upscale2d(x, factor=2, gain=1):
     assert x.dim() == 4
     if gain != 1:
         x = x * gain
     if factor != 1:
-        shape = x.shape
-        x = x.view(shape[0], shape[1], shape[2], 1, shape[3],
-                   1).expand(-1, -1, -1, factor, -1, factor)
-        x = x.contiguous().view(
-            shape[0], shape[1], factor * shape[2], factor * shape[3])
+        x = F.interpolate(x, scale_factor=factor, mode='nearest')
     return x
 
 
@@ -429,14 +430,51 @@ class G_synthesis(nn.Module):
                               gain=1, use_wscale=use_wscale)
         self.blocks = nn.ModuleDict(OrderedDict(blocks))
 
+    # Run the high-resolution tail of the network (blocks >= min_res, plus toRGB) in
+    # `dtype`, leaving the cheap early blocks in fp32.
+    #
+    # Measured per-block on an M4 Max: cost and fp16 error are INVERSELY related. The
+    # 1024/512/256 blocks are ~89% of the step time but the MOST fp16-tolerant (max image
+    # error 0.006-0.011) -- their error lands near the output and doesn't propagate. The
+    # small early blocks are the LEAST tolerant (8x8: 0.040; an error there is amplified
+    # by every block downstream) AND are so cheap that cast overhead makes them actively
+    # slower in half. So half-precision only pays at the top of the stack.
+    #
+    # Those blocks are contiguous, so the cast happens ONCE on entry and once on exit --
+    # not per block. Casting at every boundary round-trips a 1024x1024 activation four
+    # times and gives back half the speedup (measured: +4.6% vs +8.9%).
+    def set_high_res_precision(self, dtype, min_res=256):
+        self.half_dtype = dtype
+        self.half_from_res = min_res
+        for name, block in self.blocks.items():
+            if int(name.split('x')[0]) >= min_res:
+                block.to(dtype)
+        self.torgb.to(dtype)
+
     # Run the latents (and per-layer noise) through every synthesis block in turn,
     # then the toRGB conv, to produce the generated image.
     def forward(self, dlatents_in, noise_in):
         # Input: Disentangled latents (W) [minibatch, num_layers, dlatent_size].
-        for i, m in enumerate(self.blocks.values()):
+        half_from = getattr(self, 'half_from_res', None)
+        dtype = getattr(self, 'half_dtype', None)
+
+        for i, (name, m) in enumerate(self.blocks.items()):
+            w = dlatents_in[:, 2*i:2*i+2]
+            n = noise_in[2*i:2*i+2]
+
+            # Entering the half-precision tail: cast the activation once, here. (Once, not
+            # per block -- the half blocks are contiguous, and a fp16->fp32->fp16 round
+            # trip at every boundary is free accuracy-wise but costs half the speedup.)
+            if half_from is not None and int(name.split('x')[0]) >= half_from:
+                if i > 0 and x.dtype != dtype:
+                    x = x.to(dtype)
+                w = w.to(dtype)
+                n = [t.to(dtype) for t in n]
+
             if i == 0:
-                x = m(dlatents_in[:, 2*i:2*i+2], noise_in[2*i:2*i+2])
+                x = m(w, n)
             else:
-                x = m(x, dlatents_in[:, 2*i:2*i+2], noise_in[2*i:2*i+2])
+                x = m(x, w, n)
+
         rgb = self.torgb(x)
-        return rgb
+        return rgb.float()

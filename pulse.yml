@@ -4,6 +4,13 @@ name: pulse
 # CUDA/CPU "conda" setup and the MPS setup run an identical torch. Only the
 # packages the code actually imports are listed; the original carried many
 # unused pins (matplotlib, pandas, etc.).
+#
+# torch is capped BELOW 2.13 on purpose. 2.13.0 regressed the MPS *backward* pass
+# ~25% on this model (the forward is unaffected): the backward of broadcast/expand
+# reductions blew up -- expand().contiguous() backward is 36x slower, which is what
+# StyleGAN's upsample, StyleMod and NoiseLayer all lean on. Measured on an M4 Max:
+# 22.4 it/s on 2.10-2.12 vs 16.7 it/s on 2.13. 2.10, 2.11 and 2.12 are equivalent.
+# Re-check when a torch >2.13 ships; the cap can be lifted once the backward is fixed.
 channels:
   - conda-forge
 dependencies:
@@ -11,8 +18,8 @@ dependencies:
   - cmake          # required to build dlib
   - pip
   - pip:
-    - torch==2.10.0
-    - torchvision==0.25.0
+    - torch>=2.10,<2.13
+    - torchvision>=0.25,<0.28
     - numpy
     - scipy
     - pillow
