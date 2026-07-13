@@ -239,9 +239,13 @@ class PULSE(torch.nn.Module):
         current_info = f' | time: {total_t:.1f} | it/s: {(j+1)/total_t:.2f} | batchsize: {batch_size}'
         if self.verbose:
             print(best_summary+current_info)
-        # if(min_l2 <= eps):
-        
-        yield (gen_im.clone().cpu().detach().clamp(0, 1), loss_builder.D(best_im).cpu().detach().clamp(0, 1))
+
+        # Yield the BEST iterate, not the last one. This used to hand back gen_im (the
+        # final step) as HR while taking LR from best_im -- two different images, and
+        # neither matched the "BEST (n)" the line above advertises. The loss is not
+        # monotone (the 1cycle schedule raises the LR mid-run, and GEOCROSS trades off
+        # against L2), so on some inputs the last step is genuinely worse than the best.
+        yield (best_im.cpu().detach().clamp(0, 1), loss_builder.D(best_im).cpu().detach().clamp(0, 1))
         
         # else:
         #     print("Could not find a face that downscales correctly within epsilon")
