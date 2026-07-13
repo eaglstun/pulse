@@ -109,4 +109,56 @@ Matching the pixels and staying a plausible human being are genuinely different 
 
 ---
 
+## Sweep three: a child in hypnosis goggles
+
+The two sweeps above are polite. Both inputs are photographs of ordinary adults doing nothing unusual, so every setting solves them and the differences are a matter of taste.
+
+So let's give it something it has no business succeeding at.
+
+<img src="../readme_resources/experiments/hypno_original.jpeg" alt="The original photo: a small child with magenta hair wearing novelty hypnosis-spiral goggles, hands raised palms-out beside their face" width="240"> <img src="../readme_resources/experiments/hypno_input.png" alt="The same photo downscaled to 32x32, an unrecognisable smear of pink and yellow blocks" width="240">
+
+A small child, magenta hair, novelty x-ray/hypno-spiral goggles, both hands up with the palms facing the camera. Downscaled to 32×32 (right, shown enlarged), it becomes a smear of pink and yellow blocks.
+
+Now consider what PULSE has to do with that. It is searching a space of **faces**. There is no vector in StyleGAN's latent space that means "goggles." There is no vector that means "hands." Every candidate it can possibly produce is a plain human face — and it has been asked to find one that shrinks down onto _that_.
+
+It cannot. So it compromises, and **what it chooses to sacrifice is the interesting part.**
+
+| Setting         | `L2` (target `0.002`)    | `GEOCROSS`  | What it did                                      |
+| --------------- | ------------------------ | ----------- | ------------------------------------------------ |
+| `geocross_high` | **0.0143** (worst match) | 0.137       | Refused. Rendered a perfectly nice man.          |
+| `tile_latent`   | 0.0077                   | 0.000       | Goggles → purple eyeshadow.                      |
+| `noise_fixed`   | 0.0060                   | 5.39        | Goggles → dark sunken eyes.                      |
+| `baseline`      | 0.0051                   | 4.77        | Goggles → dark sunken eyes. Hands → flesh-blobs. |
+| `no_geocross`   | **0.0023** (best match)  | _(deleted)_ | Full body horror. Nothing was sacred.            |
+
+| geocross_high                                                                                                                              | baseline                                                                                                                               | noise_fixed                                                                                                                             | tile_latent                                                                                                                               | no_geocross                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="../readme_resources/experiments/hypno_geocross_high.png" alt="hypno geocross_high: a completely normal smiling man" width="160"> | <img src="../readme_resources/experiments/hypno_baseline.png" alt="hypno baseline: a smirking face with dark sunken eyes" width="160"> | <img src="../readme_resources/experiments/hypno_noise_fixed.png" alt="hypno noise_fixed: similar sunken-eyed face, waxier" width="160"> | <img src="../readme_resources/experiments/hypno_tile_latent.png" alt="hypno tile_latent: a face with heavy purple eyeshadow" width="160"> | <img src="../readme_resources/experiments/hypno_no_geocross.png" alt="hypno no_geocross: a nightmarish face with glowing green slits for eyes and extra faces at the edges" width="160"> |
+
+Read that table left to right. It is the realism prior, as a dial.
+
+- **Crank it up (`geocross_high`) and PULSE simply refuses.** It hands you a cheerful, entirely ordinary man. No goggles, no hands, no magenta. It has decided that a plausible face matters more than matching your pixels, and it is _wrong by the widest margin of any run here_ — `L2 0.0143`, seven times the target. It would rather be a nice photograph than a correct one.
+- **Leave it at default** and the goggles get reinterpreted as **dark, hollowed-out eyes** — the closest thing to two black circles that a face is allowed to have. Look at the edges: those flesh-coloured lumps are the child's raised hands, dissolving into shoulder.
+- **Delete it entirely (`no_geocross`) and there is nothing left to stop it.** Glowing green slits for eyes. Waxy, sagging skin. And the hands — with no prior insisting the world contains one face — resolve into **two additional faces**, one on each side.
+
+And `no_geocross` gets the **best pixel match of the five** (`0.0023`, nearly on target). Of course it does. It was the only one willing to do whatever it took.
+
+That is the whole thesis of the loss function, in five pictures. "Match the input" and "be a real face" are _not the same objective_, and normally you never notice, because for a photograph of an ordinary person you can satisfy both at once. Hand it something impossible and the two goals tear apart, and you get to watch which one each setting is prepared to abandon.
+
+### And then there's `-steps`
+
+The default 100 steps says `NOT CONVERGED` on this input, which is exactly what [the section at the top of this page](#the-headline--steps-is-too-low-and-it-isnt-close) predicts. So give it 800.
+
+| 100 steps — `L2 0.0051`, NOT CONVERGED                                                                                                                         | 800 steps — `L2 0.0020`, converged                                                                                                                                                                             |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="../readme_resources/experiments/hypno_baseline.png" alt="100 steps: a bland face with sunken eyes that does not really match the input" width="260"> | <img src="../readme_resources/experiments/hypno_800steps.png" alt="800 steps: the same face, now with distinct golden rings around the eyes where the goggles were, and magenta tint in the hair" width="260"> |
+
+More steps did not make it more normal. **More steps made it commit to the bit.**
+
+Look at the eyes on the right: those are _golden rings_. Look at the hair: magenta is bleeding in. Given a hundred steps it gave up early and handed back a bland face that didn't match. Given eight hundred, it kept descending — and the only way down was to actually render the goggles.
+
+The 100-step version isn't a tamer answer. It's an **unfinished** one. That's the difference the `NOT CONVERGED` warning is trying to tell you about, and this is the clearest picture of it in the repo.
+
+---
+
 **Next:** [Apple Silicon notes](apple-silicon.md) — making the extra steps affordable · [How it works](how-it-works.md)
